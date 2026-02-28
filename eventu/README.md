@@ -20,6 +20,38 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+### Authentication setup
+
+The dashboard is protected by Auth0.  You'll need to configure a tenant
+and supply credentials via environment variables before you can log in and
+register for events.
+
+1. Create a free account at https://auth0.com and add a **Regular Web
+	Application**.
+2. In the application settings, set the following URLs:
+	* **Allowed Callback URLs**: `http://localhost:3000/api/auth/callback`
+	* **Allowed Logout URLs**: `http://localhost:3000`
+	* **Allowed Web Origins**: `http://localhost:3000`
+3. Copy the **Domain**, **Client ID**, and **Client Secret** from the
+	application settings.
+4. Generate a long random string for `AUTH0_SECRET` (e.g. `openssl rand -hex 32`).
+5. Create a `.env.local` file in the project root with the following
+	values (replace placeholders with your real values):
+
+```env
+AUTH0_SECRET="<your-secret>"
+AUTH0_BASE_URL="http://localhost:3000"
+AUTH0_ISSUER_BASE_URL="https://<your-tenant>.us.auth0.com"
+AUTH0_CLIENT_ID="<your-client-id>"
+AUTH0_CLIENT_SECRET="<your-client-secret>"
+```
+
+6. Restart `npm run dev`; the login page will now redirect through Auth0.
+
+Once authenticated you can access `/dashboard`, register for events, and
+see your profile in the UI.
+
+The auth routes are implemented under `app/api/auth/[...auth0]/route.ts`.
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

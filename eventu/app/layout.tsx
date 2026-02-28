@@ -27,7 +27,57 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        <div className="flex min-h-screen">
+          {/* simple sidebar navigation */}
+          <nav className="w-56 bg-gray-50 border-r p-4">
+            <h2 className="text-lg font-semibold mb-4">EventU</h2>
+            <ul className="space-y-2">
+              <li>
+                <a
+                  href="/dashboard"
+                  className="block rounded px-2 py-1 hover:bg-gray-200"
+                >
+                  Dashboard
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/login"
+                  className="block rounded px-2 py-1 hover:bg-gray-200"
+                >
+                  Login
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/signup"
+                  className="block rounded px-2 py-1 hover:bg-gray-200"
+                >
+                  Signup
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/about"
+                  className="block rounded px-2 py-1 hover:bg-gray-200"
+                >
+                  About
+                </a>
+              </li>
+            </ul>
+            <div className="mt-6">
+              <a
+                href="/create"
+                className="inline-block w-full text-center rounded bg-primary px-3 py-1 text-white hover:bg-primary/90"
+              >
+                + New page
+              </a>
+            </div>
+          </nav>
+
+          {/* main content area */}
+          <main className="flex-1 p-6">{children}</main>
+        </div>
       </body>
     </html>
   );
