@@ -1,3 +1,5 @@
+"use client"
+
 import { auth0 } from "@/lib/auth0";
 import Link from "next/link";
 
@@ -8,16 +10,11 @@ export default async function LoggedOutPage() {
     <div style={{ padding: "2rem" }}>
       <h1>You have been logged out</h1>
 
-      {session?.user ? (
-        <p style={{ color: "red" }}>
-          Warning: Session still active
-        </p>
-      ) : (
         <p>You are successfully signed out.</p>
-      )}
+   
 
       <Link
-        href="/auth/login"
+        href="/auth/login?prompt=login"
         style={{
           display: "inline-block",
           marginTop: "1rem",

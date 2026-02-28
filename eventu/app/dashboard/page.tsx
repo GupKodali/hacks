@@ -31,6 +31,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import LogoutButton from "@/components/LogoutButton"
 
 type Registration = {
   event: EventItem
@@ -187,6 +188,7 @@ export default function DashboardPage() {
             Signed in as {user.name || user.email}
           </span>
         )}
+        <LogoutButton />
       </h1>
 
       <div className="flex gap-6">
