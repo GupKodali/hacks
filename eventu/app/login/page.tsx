@@ -1,29 +1,35 @@
 // app/login/page.tsx
+import { redirect } from "next/navigation";
+import { auth0 } from "@/lib/auth0";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-export default function LoginPage() {
+export default async function LoginPage() {
+  const session = await auth0.getSession();
+  if (session) redirect("/post-login");
+
   return (
     <main className="min-h-[100svh] bg-background">
       <div className="mx-auto flex min-h-[100svh] w-full max-w-md flex-col px-4 py-10">
         <header className="mb-8">
           <h1 className="text-3xl font-semibold tracking-tight">Log in</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Use your email and password to continue. You’ll be taken to your dashboard after signing in.
+            Secure login is handled by Auth0. After signing in, you’ll be routed to setup (if needed)
+            and then your dashboard.
           </p>
         </header>
 
         <Card className="shadow-sm">
           <CardHeader className="space-y-2">
             <CardTitle className="text-xl">Continue</CardTitle>
-            <CardDescription>Secure login handled by Auth0.</CardDescription>
+            <CardDescription>Use email/password or create a new account.</CardDescription>
           </CardHeader>
 
           <CardContent className="space-y-3">
-            {/* Auth0 recommends <a> (not next/link) for auth routes */}
+            {/* Auth0 routes: use <a> (not next/link) */}
             <a href="/auth/login" className="block">
               <Button className="h-12 w-full text-base" size="lg">
-                Log in with email
+                Log in
               </Button>
             </a>
 
@@ -34,7 +40,7 @@ export default function LoginPage() {
             </a>
 
             <p className="pt-2 text-center text-xs text-muted-foreground">
-              You’ll land on your dashboard after login.
+              Already signed in? You’ll be redirected automatically.
             </p>
           </CardContent>
         </Card>
