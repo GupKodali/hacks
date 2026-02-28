@@ -53,7 +53,9 @@ export default function RootLayout({
                   href="/signup"
                   className="block rounded px-2 py-1 hover:bg-gray-200"
                 >
-                  Signup
+                  {typeof window !== "undefined" && localStorage.getItem("userName")
+                  ? `${localStorage.getItem("userName")}'s Preferences`
+                  : "User's Preferences"}
                 </a>
               </li>
               <li>
