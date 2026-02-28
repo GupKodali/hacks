@@ -49,7 +49,6 @@ export default function SignupPage() {
               <Separator />
             </div>
 
-            {/* Email/Password (Auth0 DB / Passwordless) */}
             <a href="/auth/login?screen_hint=signup" className="block">
               <Button className="h-12 w-full text-base" size="lg">
                 Create account with email
