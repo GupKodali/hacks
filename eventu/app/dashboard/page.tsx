@@ -370,6 +370,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import LogoutButton from "@/components/LogoutButton"
+import RequireAuth from "@/components/RequireAuth"
 
 type Registration = {
   event: EventItem
@@ -546,6 +548,7 @@ export default function DashboardPage() {
   /* ------------------ UI ------------------ */
 
   return (
+    <RequireAuth>
     <div className="min-h-screen p-6">
       <h1 className="text-2xl font-semibold mb-6 text-center">
         <div className="flex justify-center">
@@ -571,6 +574,7 @@ export default function DashboardPage() {
 
               return (
                 <Card key={ev.id}>
+                  <LogoutButton/>
                   <CardHeader>
                     <CardTitle>{ev.title}</CardTitle>
                     <CardDescription>{ev.location}</CardDescription>
@@ -664,5 +668,6 @@ export default function DashboardPage() {
         </aside>
       </div>
     </div>
+    </RequireAuth>
   )
 }
