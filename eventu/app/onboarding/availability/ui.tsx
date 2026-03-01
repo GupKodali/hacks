@@ -16,22 +16,45 @@ type OnboardingDraft = {
   depositAcknowledged: boolean;
 };
 
+const DEFAULT_DRAFT: OnboardingDraft = {
+  hobbies: [],
+  availabilityBlocks: [],
+  depositAcknowledged: false,
+};
+
 function loadDraft(): OnboardingDraft {
   try {
+    if (typeof window === "undefined") return DEFAULT_DRAFT;
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : { hobbies: [], availabilityBlocks: [], depositAcknowledged: false };
+    return raw ? (JSON.parse(raw) as OnboardingDraft) : DEFAULT_DRAFT;
   } catch {
-    return { hobbies: [], availabilityBlocks: [], depositAcknowledged: false };
+    return DEFAULT_DRAFT;
   }
 }
+
 function saveDraft(draft: OnboardingDraft) {
+  if (typeof window === "undefined") return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
 }
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
 function isValidBlock(b: Block) {
+  // Note: "HH:MM" lexicographic compare is valid for 24h time inputs
   return b.day && b.start && b.end && b.start < b.end;
+}
+
+/**
+ * Enforce at most ONE window per day:
+ * - If a window for the day doesn't exist, add it.
+ * - If it does exist, replace it (better UX than rejecting silently).
+ */
+function upsertBlockByDay(blocks: Block[], incoming: Block) {
+  const idx = blocks.findIndex((b) => b.day === incoming.day);
+  if (idx === -1) return [...blocks, incoming];
+  const next = [...blocks];
+  next[idx] = incoming;
+  return next;
 }
 
 export default function AvailabilityClient() {
@@ -52,7 +75,7 @@ export default function AvailabilityClient() {
     if (!isValidBlock(newBlock)) return;
 
     setBlocks((prev) => {
-      const next = [...prev, newBlock];
+      const next = upsertBlockByDay(prev, newBlock);
       const draft = loadDraft();
       saveDraft({ ...draft, availabilityBlocks: next });
       return next;
@@ -68,12 +91,29 @@ export default function AvailabilityClient() {
     });
   };
 
+  // Users are NOT required to create a window for every day;
+  // they just need at least one to proceed.
   const canContinue = blocks.length > 0;
 
   const subtitle = useMemo(
     () => "Add time windows you can reliably make during the week. Matching uses overlaps.",
     []
   );
+
+  const dayAlreadyHasWindow = useMemo(
+    () => blocks.some((b) => b.day === day),
+    [blocks, day]
+  );
+
+  // Optional: keep display order consistent (Mon -> Sun)
+  const orderedBlocks = useMemo(() => {
+    const order = new Map(DAYS.map((d, i) => [d, i]));
+    return [...blocks].sort(
+      (a, b) =>
+        (order.get(a.day as (typeof DAYS)[number]) ?? 0) -
+        (order.get(b.day as (typeof DAYS)[number]) ?? 0)
+    );
+  }, [blocks]);
 
   return (
     <OnboardingShell step={2} title="Set your availability" subtitle={subtitle}>
@@ -85,7 +125,7 @@ export default function AvailabilityClient() {
               <select
                 className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                 value={day}
-                onChange={(e) => setDay(e.target.value as any)}
+                onChange={(e) => setDay(e.target.value as (typeof DAYS)[number])}
               >
                 {DAYS.map((d) => (
                   <option key={d} value={d}>
@@ -117,11 +157,11 @@ export default function AvailabilityClient() {
           </div>
 
           <Button type="button" className="h-11 w-full" onClick={addBlock}>
-            Add time window
+            {dayAlreadyHasWindow ? "Update time window" : "Add time window"}
           </Button>
 
           <p className="text-xs text-muted-foreground">
-            Tip: fewer, reliable windows beats “maybe” availability.
+            Tip: fewer, reliable windows beats “maybe” availability. (One window per day max.)
           </p>
         </div>
 
@@ -130,12 +170,15 @@ export default function AvailabilityClient() {
         <div className="space-y-2">
           <h3 className="text-sm font-medium">Your windows</h3>
 
-          {blocks.length === 0 ? (
+          {orderedBlocks.length === 0 ? (
             <p className="text-sm text-muted-foreground">No availability added yet.</p>
           ) : (
             <ul className="space-y-2">
-              {blocks.map((b, idx) => (
-                <li key={`${b.day}-${b.start}-${b.end}-${idx}`} className="flex items-center justify-between rounded-lg border px-3 py-2">
+              {orderedBlocks.map((b, idx) => (
+                <li
+                  key={`${b.day}-${b.start}-${b.end}-${idx}`}
+                  className="flex items-center justify-between rounded-lg border px-3 py-2"
+                >
                   <div className="text-sm">
                     <span className="font-medium">{b.day}</span>{" "}
                     <span className="text-muted-foreground">
@@ -155,7 +198,7 @@ export default function AvailabilityClient() {
           )}
         </div>
 
-        <div className="flex gap-3 pt-2">
+        <div className="flex flex-col gap-3 pt-2">
           <Button
             type="button"
             variant="secondary"
