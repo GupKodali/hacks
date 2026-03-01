@@ -1,166 +1,288 @@
-import { Badge } from "@/components/ui/badge"
+"use client"
+
+import React, { useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card"
-import { EventItem, formatTimeRange } from "@/lib/events"
-import { Target, Sparkles, MapPin } from "lucide-react"
-import { useMemo } from "react"
-import { AvailabilityBlock } from "./page"
-import { MiniAvailabilityGrid } from "@/components/availability-graph"
+import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
+import { ChevronDown, ChevronUp } from "lucide-react"
+import type { AvailabilityBlock } from "./page" // adjust import path
+import type { EventItem } from "@/lib/events"
+import { formatTimeRange } from "@/lib/events"
+
+type Props = {
+  userReady: boolean
+  availability: AvailabilityBlock[]
+  onToggle: (day: number, hour: number) => void
+  onQuickSet: (preset: "weeknights" | "weekend" | "clear") => void
+  suggested: EventItem[]
+  onConfirm: (ev: EventItem) => void
+}
+
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+function hourLabel(h: number) {
+  const hr12 = ((h + 11) % 12) + 1
+  const ampm = h >= 12 ? "PM" : "AM"
+  return `${hr12}${ampm}`
+}
+
+/** Turn selected hours into compact ranges like 6–9PM or 10AM–12PM */
+function compressHours(hours: number[]) {
+  const sorted = [...hours].sort((a, b) => a - b)
+  const ranges: Array<{ start: number; end: number }> = []
+  let i = 0
+  while (i < sorted.length) {
+    let start = sorted[i]
+    let end = start
+    while (i + 1 < sorted.length && sorted[i + 1] === sorted[i] + 1) {
+      i++
+      end = sorted[i]
+    }
+    ranges.push({ start, end })
+    i++
+  }
+  return ranges.map(({ start, end }) => {
+    if (start === end) return hourLabel(start)
+    // interpret blocks as hour slots; show as start–(end+1)
+    const endDisplay = end + 1
+    return `${hourLabel(start)}–${hourLabel(endDisplay)}`
+  })
+}
 
 export function ScheduleTabMobile({
-    userReady,
-    availability,
-    onToggle,
-    onQuickSet,
-    suggested,
-    onConfirm,
-  }: {
-    userReady: boolean
-    availability: AvailabilityBlock[]
-    onToggle: (day: number, hour: number) => void
-    onQuickSet: (preset: "weeknights" | "weekend" | "clear") => void
-    suggested: EventItem[]
-    onConfirm: (ev: EventItem) => void
-  }) {
-    const selectedCount = availability.length
-  
-    const commonSlots = useMemo(
-      () => [
-        { label: "Mon 6–9", day: 1, hours: [18, 19, 20, 21] },
-        { label: "Tue 6–9", day: 2, hours: [18, 19, 20, 21] },
-        { label: "Wed 6–9", day: 3, hours: [18, 19, 20, 21] },
-        { label: "Thu 6–9", day: 4, hours: [18, 19, 20, 21] },
-        { label: "Sat 10–2", day: 6, hours: [10, 11, 12, 13, 14] },
-        { label: "Sun 10–2", day: 0, hours: [10, 11, 12, 13, 14] },
-      ],
-      []
-    )
-  
-    function isSelected(day: number, hour: number) {
-      return availability.some((b) => b.day === day && b.hour === hour)
+  userReady,
+  availability,
+  onToggle,
+  onQuickSet,
+  suggested,
+  onConfirm,
+}: Props) {
+  // If they already picked stuff, keep the grid collapsed by default.
+  const [gridOpen, setGridOpen] = useState(availability.length === 0)
+  const [showAllHours, setShowAllHours] = useState(false)
+
+  const selectedByDay = useMemo(() => {
+    const map = new Map<number, number[]>()
+    for (const b of availability) {
+      map.set(b.day, [...(map.get(b.day) ?? []), b.hour])
     }
-  
-    function toggleSlotGroup(day: number, hours: number[]) {
-      const allSelected = hours.every((h) => isSelected(day, h))
-      for (const h of hours) {
-        if (allSelected) {
-          if (isSelected(day, h)) onToggle(day, h)
-        } else {
-          if (!isSelected(day, h)) onToggle(day, h)
-        }
-      }
-    }
-  
-    return (
-      <div className="space-y-4">
-        <Card className="rounded-2xl">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Target className="h-4 w-4" />
-              Availability
-            </CardTitle>
-            <CardDescription>Pick times you can play — we’ll schedule your week.</CardDescription>
-          </CardHeader>
-  
-          <CardContent className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" className="rounded-xl" onClick={() => onQuickSet("weeknights")}>
-                Weeknights
-              </Button>
-              <Button variant="outline" size="sm" className="rounded-xl" onClick={() => onQuickSet("weekend")}>
-                Weekend
-              </Button>
-              <Button variant="outline" size="sm" className="rounded-xl" onClick={() => onQuickSet("clear")}>
-                Clear
-              </Button>
-              <Badge variant="secondary" className="ml-auto">
-                {selectedCount} blocks
-              </Badge>
+    return map
+  }, [availability])
+
+  const selectedSummary = useMemo(() => {
+    const items = [...selectedByDay.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([day, hours]) => ({
+        day,
+        ranges: compressHours(hours),
+      }))
+      .filter((d) => d.ranges.length > 0)
+
+    return items
+  }, [selectedByDay])
+
+  // “Common” hours (compact): weeknights + weekend day
+  const hoursCompact = useMemo(() => {
+    // Feel free to tweak: these are the “set times” most people care about.
+    return [10, 11, 12, 13, 14, 18, 19, 20, 21]
+  }, [])
+
+  const hoursAll = useMemo(() => Array.from({ length: 15 }, (_, i) => i + 8), []) // 8AM..10PM
+  const hours = showAllHours ? hoursAll : hoursCompact
+
+  const selectedSet = useMemo(() => {
+    const s = new Set<string>()
+    for (const b of availability) s.add(`${b.day}-${b.hour}`)
+    return s
+  }, [availability])
+
+  return (
+    <div className="space-y-4">
+      {/* Top actions */}
+      <div className="px-4 sm:px-0">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="rounded-xl"
+            disabled={!userReady}
+            onClick={() => onQuickSet("weeknights")}
+          >
+            Weeknights
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="rounded-xl"
+            disabled={!userReady}
+            onClick={() => onQuickSet("weekend")}
+          >
+            Weekend
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="rounded-xl"
+            disabled={!userReady}
+            onClick={() => onQuickSet("clear")}
+          >
+            Clear
+          </Button>
+        </div>
+
+        {/* Selected times list */}
+        <div className="mt-3">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-semibold">Your set times</div>
+            <button
+              type="button"
+              onClick={() => setGridOpen((v) => !v)}
+              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground"
+            >
+              {gridOpen ? (
+                <>
+                  Hide grid <ChevronUp className="h-4 w-4" />
+                </>
+              ) : (
+                <>
+                  Edit in grid <ChevronDown className="h-4 w-4" />
+                </>
+              )}
+            </button>
+          </div>
+
+          {selectedSummary.length === 0 ? (
+            <div className="mt-2 text-sm text-muted-foreground">
+              No availability selected yet. Open the grid to pick times.
             </div>
-  
-            {!userReady && (
-              <div className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">
-                Sign in to save availability and confirm scheduled games.
-              </div>
-            )}
-  
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Common time blocks</div>
-              <div className="flex flex-wrap gap-2">
-                {commonSlots.map((s) => {
-                  const allSelected = s.hours.every((h) => isSelected(s.day, h))
-                  return (
-                    <button
-                      key={s.label}
-                      disabled={!userReady}
-                      onClick={() => toggleSlotGroup(s.day, s.hours)}
-                      className={`rounded-full border px-3 py-2 text-sm transition ${
-                        allSelected ? "bg-primary text-primary-foreground border-primary" : "bg-background"
-                      } ${!userReady ? "opacity-60" : ""}`}
-                    >
-                      {s.label}
-                    </button>
-                  )
-                })}
-              </div>
-  
-              <div className="text-xs text-muted-foreground">
-                Want more control? Use the mini grid below.
-              </div>
+          ) : (
+            <div className="mt-2 space-y-2">
+              {selectedSummary.map(({ day, ranges }) => (
+                <div key={day} className="flex items-start gap-2">
+                  <div className="w-10 shrink-0 pt-0.5 text-xs font-medium text-muted-foreground">
+                    {DAY_NAMES[day]}
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {ranges.map((r) => (
+                      <Badge key={r} variant="secondary" className="h-6 rounded-lg px-2 text-xs">
+                        {r}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
-  
-            <div className="overflow-x-auto">
-              <div className="min-w-[520px] rounded-xl border p-3 ">
-                <MiniAvailabilityGrid disabled={!userReady} availability={availability} onToggle={onToggle} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-  
-        <Card className="rounded-2xl">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Sparkles className="h-4 w-4" />
-              Suggested schedule
-            </CardTitle>
-            <CardDescription>Games that match your availability (no overlaps).</CardDescription>
-          </CardHeader>
-  
-          <CardContent className="space-y-3">
-            {selectedCount === 0 ? (
-              <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
-                Select a few time blocks to generate suggestions.
-              </div>
-            ) : suggested.length === 0 ? (
-              <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
-                No suggestions match your current availability. Add more blocks.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-3">
-                {suggested.map((ev) => (
-                  <Card key={ev.id} className="rounded-2xl">
-                    <CardHeader className="space-y-1 pb-3">
-                      <CardTitle className="text-base truncate">{ev.title}</CardTitle>
-                      <CardDescription className="flex items-center gap-1 truncate">
-                        <MapPin className="h-4 w-4" />
-                        <span className="truncate">{ev.location}</span>
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-2 pt-0">
-                      <div className="text-sm text-muted-foreground line-clamp-2">{ev.description}</div>
-                      <div className="text-sm font-medium">{formatTimeRange(ev)}</div>
-                    </CardContent>
-                    <CardFooter className="pt-3">
-                      <Button className="w-full rounded-xl" size="sm" disabled={!userReady} onClick={() => onConfirm(ev)}>
-                        Confirm this game
-                      </Button>
-                    </CardFooter>
-                  </Card>
+          )}
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* Collapsible grid */}
+      {gridOpen && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between px-4 sm:px-0">
+            <div className="text-sm font-semibold">Availability grid</div>
+            <button
+              type="button"
+              onClick={() => setShowAllHours((v) => !v)}
+              className="rounded-lg px-2 py-1 text-xs text-muted-foreground"
+            >
+              {showAllHours ? "Show fewer hours" : "Show all hours"}
+            </button>
+          </div>
+
+          {/* Grid: compact, tap-friendly */}
+          <div className="overflow-x-auto px-4 pb-1 sm:px-0">
+            <div className="min-w-[560px]">
+              {/* Header row */}
+              <div className="grid grid-cols-[72px_repeat(7,1fr)] gap-1">
+                <div className="text-[11px] text-muted-foreground" />
+                {DAY_NAMES.map((d) => (
+                  <div
+                    key={d}
+                    className="rounded-lg bg-muted/40 py-1 text-center text-[11px] font-medium"
+                  >
+                    {d}
+                  </div>
                 ))}
               </div>
-            )}
-          </CardContent>
-        </Card>
+
+              {/* Hour rows */}
+              <div className="mt-1 space-y-1">
+                {hours.map((h) => (
+                  <div key={h} className="grid grid-cols-[72px_repeat(7,1fr)] gap-1">
+                    <div className="flex items-center justify-end pr-2 text-[11px] text-muted-foreground">
+                      {hourLabel(h)}
+                    </div>
+
+                    {Array.from({ length: 7 }).map((_, day) => {
+                      const on = selectedSet.has(`${day}-${h}`)
+                      return (
+                        <button
+                          key={`${day}-${h}`}
+                          type="button"
+                          disabled={!userReady}
+                          onClick={() => onToggle(day, h)}
+                          className={[
+                            "h-9 rounded-lg border text-[11px] transition",
+                            "disabled:opacity-50",
+                            on
+                              ? "bg-foreground text-background"
+                              : "bg-background hover:bg-muted/30",
+                          ].join(" ")}
+                          aria-pressed={on}
+                        >
+                          {on ? "On" : ""}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="px-4 text-xs text-muted-foreground sm:px-0">
+            Tip: pick 2–4 time windows you can reliably make each week.
+          </div>
+        </div>
+      )}
+
+      <Separator />
+
+      {/* Suggested schedule (compact list) */}
+      <div className="space-y-2">
+        <div className="px-4 text-sm font-semibold sm:px-0">Suggested this week</div>
+
+        {suggested.length === 0 ? (
+          <div className="px-4 text-sm text-muted-foreground sm:px-0">
+            No suggestions match your set times yet—add more availability.
+          </div>
+        ) : (
+          <div className="divide-y border-y">
+            {suggested.map((ev) => (
+              <div key={ev.id} className="-mx-4 w-[calc(100%+2rem)] px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">{ev.title}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">{ev.location}</div>
+                    <div className="mt-2 text-sm font-medium">{formatTimeRange(ev)}</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="shrink-0 rounded-xl"
+                    disabled={!userReady}
+                    onClick={() => onConfirm(ev)}
+                  >
+                    Confirm
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
-    )
-  }
+    </div>
+  )
+}
