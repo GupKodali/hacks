@@ -76,6 +76,15 @@ export default function DashboardPage() {
   }, [registrations, user])
 
   const registeredEvents = useMemo(() => registrations.map((r) => r.event), [registrations])
+  const attendingCountById = useMemo(() => {
+  const map: Record<string, number> = {}
+
+  for (const r of registrations) {
+    map[r.event.id] = (map[r.event.id] || 0) + 1
+  }
+
+  return map
+}, [registrations])
 
   // --- Time logic for 1PM + "rest of day" ---
   const now = useMemo(() => new Date(nowTick), [nowTick])
@@ -215,7 +224,9 @@ export default function DashboardPage() {
                     <p className="mt-3 text-sm">{formatTimeRange(ev)}</p>
                   </CardContent>
                   <CardFooter className="justify-between">
-                    <div className="text-sm">{(ev.attendees || []).length} attending</div>
+                    <div className="text-sm">
+                      {(ev.attendees?.length || 0) + (attendingCountById[ev.id] || 0)} attending
+                    </div>
                     <Button
                       size="sm"
                       onClick={() => handleRegister(ev)}
@@ -294,7 +305,9 @@ export default function DashboardPage() {
                                 <p className="mt-3 text-sm">{formatTimeRange(ev)}</p>
                               </CardContent>
                               <CardFooter className="justify-between">
-                                <div className="text-sm">{(ev.attendees || []).length} attending</div>
+                                <div className="text-sm">
+                                  {(ev.attendees?.length || 0) + (attendingCountById[ev.id] || 0)} attending
+                                </div>
                                 <Button
                                   size="sm"
                                   onClick={() => handleJumpIn(ev)}
