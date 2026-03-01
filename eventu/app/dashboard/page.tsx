@@ -1,377 +1,615 @@
-"use client"
+  "use client"
 
-import React, { useEffect, useMemo, useState } from "react"
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
-import { useUser } from "@auth0/nextjs-auth0/client"
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardFooter,
-} from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import {
-  sampleEvents,
-  EventItem,
-  overlaps,
-  formatTimeRange,
-  eventsHappeningToday,
-} from "@/lib/events"
-import Image from "next/image"
+  import React, { useCallback, useEffect, useMemo, useState } from "react"
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  import { useUser } from "@auth0/nextjs-auth0/client"
+  import Image from "next/image"
 
-// ✅ shadcn dialog (adjust import path if yours differs)
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import LogoutButton from "@/components/LogoutButton"
+  import {
+    Card,
+    CardHeader,
+    CardTitle,
+    CardDescription,
+    CardContent,
+    CardFooter,
+  } from "@/components/ui/card"
+  import { Button } from "@/components/ui/button"
+  import { Badge } from "@/components/ui/badge"
+  import { Separator } from "@/components/ui/separator"
+  import { Switch } from "@/components/ui/switch"
+  import { Input } from "@/components/ui/input"
 
-type Registration = {
-  event: EventItem
-  name: string
-}
+  import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+  } from "@/components/ui/dialog"
 
-const STORAGE_KEY_BASE = "eventu:registrations"
+  import {
+    sampleEvents,
+    EventItem,
+    overlaps,
+    formatTimeRange,
+    eventsHappeningToday,
+  } from "@/lib/events"
 
-export default function DashboardPage() {
-  const { user, error, isLoading } = useUser()
-  const [events] = useState<EventItem[]>(() => sampleEvents())
-  const [registrations, setRegistrations] = useState<Registration[]>([])
-  const [warning, setWarning] = useState<string | null>(null)
+  import LogoutButton from "@/components/LogoutButton"
+  import {
+    CalendarDays,
+    CheckCircle2,
+    Clock,
+    Compass,
+    Info,
+    MapPin,
+    Sparkles,
+    Target,
+    User,
+    Users,
+    Zap,
+  } from "lucide-react"
+  import { JumpInTabMobile } from "./jump-in"
+  import { DiscoverTabMobile } from "./discover"
+  import { ProfileTabMobile } from "./profile"
+  import { WeekTabMobile } from "./week"
+  import { ScheduleTabMobile } from "./schedule"
 
-  const [jumpOpen, setJumpOpen] = useState(false)
+  type TabKey = "schedule" | "week" | "discover" | "jumpin" | "profile"
 
-  const [nowTick, setNowTick] = useState<number>(() => Date.now())
-  useEffect(() => {
-    const t = setInterval(() => setNowTick(Date.now()), 30_000)
-    return () => clearInterval(t)
-  }, [])
-
-  useEffect(() => {
-    if (!user) return
-    const key = `${STORAGE_KEY_BASE}:${user.sub}`
-    try {
-      const raw = localStorage.getItem(key)
-      if (raw) setRegistrations(JSON.parse(raw))
-    } catch (e) {
-      console.warn("failed to load registrations", e)
-    }
-  }, [user])
-
-  useEffect(() => {
-    if (!user) return
-    const key = `${STORAGE_KEY_BASE}:${user.sub}`
-    try {
-      localStorage.setItem(key, JSON.stringify(registrations))
-    } catch (e) {
-      console.warn("failed to save registrations", e)
-    }
-  }, [registrations, user])
-
-  const registeredEvents = useMemo(() => registrations.map((r) => r.event), [registrations])
-  const attendingCountById = useMemo(() => {
-  const map: Record<string, number> = {}
-
-  for (const r of registrations) {
-    map[r.event.id] = (map[r.event.id] || 0) + 1
+  export type Registration = {
+    event: EventItem
+    name: string
+    kind: "scheduled" | "manual" | "jumpin"
+    createdAt: string
   }
 
-  return map
-}, [registrations])
+  export type AvailabilityBlock = {
+    day: number // 0..6
+    hour: number // 0..23
+  }
 
-  // --- Time logic for 1PM + "rest of day" ---
-  const now = useMemo(() => new Date(nowTick), [nowTick])
+  const STORAGE_KEY_BASE = "eventu:registrations"
+  const AVAIL_KEY_BASE = "eventu:availability"
 
-  const isPast1PM = useMemo(() => {
-    const one = new Date(now)
-    one.setHours(13, 0, 0, 0) // 1:00 PM
-    return now.getTime() >= one.getTime()
-  }, [now])
 
-  const endOfDay = useMemo(() => {
-    const eod = new Date(now)
-    eod.setHours(23, 59, 59, 999)
-    return eod
-  }, [now])
+  export default function DashboardPage() {
+    const { user, error, isLoading } = useUser()
+    const [events] = useState<EventItem[]>(() => sampleEvents())
 
-  // Use the reusable helper to pick events happening today (local) that haven't ended yet.
-  const jumpInEvents = useMemo(() => eventsHappeningToday(events, now), [events, now])
+    const [registrations, setRegistrations] = useState<Registration[]>([])
+    const [availability, setAvailability] = useState<AvailabilityBlock[]>([])
 
-  // ✅ FIX: calendar should highlight events that overlap each hour block
-  function HoursCalendar({ events }: { events: EventItem[] }) {
-    const slots = Array.from({ length: 7 }).map((_, i) => {
-      const d = new Date(now)
-      d.setMinutes(0, 0, 0)
-      d.setHours(now.getHours() + i)
-      return d
-    })
+    const [tab, setTab] = useState<TabKey>("schedule")
+    const [warning, setWarning] = useState<string | null>(null)
+
+    const [query, setQuery] = useState("")
+    const [hideConflicts, setHideConflicts] = useState(true)
+
+    const [nowTick, setNowTick] = useState<number>(() => Date.now())
+    useEffect(() => {
+      const t = setInterval(() => setNowTick(Date.now()), 30_000)
+      return () => clearInterval(t)
+    }, [])
+    const now = useMemo(() => new Date(nowTick), [nowTick])
+
+    const isPast1PM = useMemo(() => {
+      const one = new Date(now)
+      one.setHours(13, 0, 0, 0)
+      return now.getTime() >= one.getTime()
+    }, [now])
+
+    // Load persisted registrations + availability
+    useEffect(() => {
+      if (!user) return
+      const rKey = `${STORAGE_KEY_BASE}:${user.sub}`
+      const aKey = `${AVAIL_KEY_BASE}:${user.sub}`
+
+      try {
+        const rawR = localStorage.getItem(rKey)
+        if (rawR) setRegistrations(JSON.parse(rawR))
+      } catch (e) {
+        console.warn("failed to load registrations", e)
+        setRegistrations([])
+      }
+
+      try {
+        const rawA = localStorage.getItem(aKey)
+        if (rawA) setAvailability(JSON.parse(rawA))
+      } catch (e) {
+        console.warn("failed to load availability", e)
+        setAvailability([])
+      }
+    }, [user])
+
+    // Save on change
+    useEffect(() => {
+      if (!user) return
+      const rKey = `${STORAGE_KEY_BASE}:${user.sub}`
+      try {
+        localStorage.setItem(rKey, JSON.stringify(registrations))
+      } catch (e) {
+        console.warn("failed to save registrations", e)
+      }
+    }, [registrations, user])
+
+    useEffect(() => {
+      if (!user) return
+      const aKey = `${AVAIL_KEY_BASE}:${user.sub}`
+      try {
+        localStorage.setItem(aKey, JSON.stringify(availability))
+      } catch (e) {
+        console.warn("failed to save availability", e)
+      }
+    }, [availability, user])
+
+    const registeredEvents = useMemo(() => registrations.map((r) => r.event), [registrations])
+
+    const attendingCountById = useMemo(() => {
+      const map: Record<string, number> = {}
+      for (const r of registrations) map[r.event.id] = (map[r.event.id] || 0) + 1
+      return map
+    }, [registrations])
+
+    const jumpInEvents = useMemo(() => eventsHappeningToday(events, now), [events, now])
+
+    const canRegister = useCallback(
+      (event: EventItem) => !registeredEvents.some((reg) => overlaps(reg, event)),
+      [registeredEvents]
+    )
+
+    // Availability matching
+    const availSet = useMemo(() => {
+      const s = new Set<string>()
+      for (const b of availability) s.add(`${b.day}-${b.hour}`)
+      return s
+    }, [availability])
+
+    function eventMatchesAvailability(ev: EventItem) {
+      const start = new Date(ev.start)
+      return availSet.has(`${start.getDay()}-${start.getHours()}`)
+    }
+
+    // Suggested schedule: up to 3 events that match availability and don't overlap
+    const suggestedSchedule = useMemo(() => {
+      const candidates = [...events]
+        .filter((ev) => eventMatchesAvailability(ev))
+        .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+
+      const alreadyIds = new Set(registrations.map((r) => r.event.id))
+      const picked: EventItem[] = []
+      for (const ev of candidates) {
+        if (alreadyIds.has(ev.id)) continue
+        const conflictPicked = picked.some((p) => overlaps(p, ev))
+        const conflictRegistered = registeredEvents.some((r) => overlaps(r, ev))
+        if (conflictPicked || conflictRegistered) continue
+        picked.push(ev)
+        if (picked.length >= 3) break
+      }
+      return picked
+    }, [events, registrations, registeredEvents, availSet])
+
+    const myUpcoming = useMemo(() => {
+      return [...registeredEvents].sort(
+        (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()
+      )
+    }, [registeredEvents])
+
+    const discoverEvents = useMemo(() => {
+      const q = query.trim().toLowerCase()
+      return events
+        .filter((ev) => {
+          if (!q) return true
+          const hay = `${ev.title} ${ev.location} ${ev.description}`.toLowerCase()
+          return hay.includes(q)
+        })
+        .filter((ev) => {
+          if (!hideConflicts) return true
+          return canRegister(ev) || registrations.some((r) => r.event.id === ev.id)
+        })
+    }, [events, query, hideConflicts, canRegister, registrations])
+
+    const userReady = Boolean(user) && !isLoading
+
+    const addRegistration = useCallback(
+      (ev: EventItem, kind: Registration["kind"]) => {
+        setWarning(null)
+        if (!user) return
+
+        const already = registrations.some((r) => r.event.id === ev.id)
+        if (already) return
+
+        if (kind !== "jumpin" && !canRegister(ev)) {
+          setWarning("That overlaps with something already on your schedule.")
+          return
+        }
+
+        if (kind === "jumpin") {
+          const conflicts = registeredEvents.some((reg) => overlaps(reg, ev))
+          if (conflicts) setWarning("Jump-in conflicts with your schedule (allowed for Jump Ins).")
+        }
+
+        const name = user?.name || user?.email || "(unknown)"
+        setRegistrations((prev) => [
+          ...prev,
+          { event: ev, name, kind, createdAt: new Date().toISOString() },
+        ])
+      },
+      [user, registrations, canRegister, registeredEvents]
+    )
+
+    const removeRegistration = useCallback((id: string) => {
+      setRegistrations((prev) => prev.filter((r) => r.event.id !== id))
+    }, [])
+
+    const toggleAvailability = useCallback((day: number, hour: number) => {
+      setAvailability((prev) => {
+        const exists = prev.some((b) => b.day === day && b.hour === hour)
+        if (exists) return prev.filter((b) => !(b.day === day && b.hour === hour))
+        return [...prev, { day, hour }]
+      })
+    }, [])
+
+    const quickSetAvailability = useCallback((preset: "weeknights" | "weekend" | "clear") => {
+      if (preset === "clear") return setAvailability([])
+      if (preset === "weeknights") {
+        const blocks: AvailabilityBlock[] = []
+        for (const day of [1, 2, 3, 4]) for (const hour of [18, 19, 20, 21]) blocks.push({ day, hour })
+        return setAvailability(blocks)
+      }
+      if (preset === "weekend") {
+        const blocks: AvailabilityBlock[] = []
+        for (const day of [6, 0]) for (const hour of [10, 11, 12, 13, 14]) blocks.push({ day, hour })
+        return setAvailability(blocks)
+      }
+    }, [])
+
+    // Compact next-hours strip (mobile)
+    function HoursStrip({ events }: { events: EventItem[] }) {
+      const slots = Array.from({ length: 6 }).map((_, i) => {
+        const d = new Date(now)
+        d.setMinutes(0, 0, 0)
+        d.setHours(now.getHours() + i)
+        return d
+      })
+
+      return (
+        <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+          {slots.map((slot) => {
+            const slotStart = slot.getTime()
+            const slotEnd = slotStart + 60 * 60 * 1000
+            const overlapping = events.filter((ev) => {
+              const s = new Date(ev.start).getTime()
+              const e = new Date(ev.end).getTime()
+              return s < slotEnd && e > slotStart
+            })
+
+            return (
+              <div
+                key={slot.toISOString()}
+                className={`min-w-[120px] rounded-xl border px-3 py-2 text-xs ${
+                  overlapping.length ? "bg-muted/40" : ""
+                }`}
+              >
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Clock className="h-4 w-4" />
+                  <span className="font-medium text-foreground">
+                    {slot.toLocaleTimeString(undefined, { hour: "numeric", hour12: true })}
+                  </span>
+                </div>
+                <div className="mt-2 space-y-1">
+                  {overlapping.length ? (
+                    overlapping.slice(0, 2).map((e) => (
+                      <div key={e.id} className="truncate font-medium">
+                        {e.title}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-muted-foreground">Free</div>
+                  )}
+                  {overlapping.length > 2 && (
+                    <div className="text-muted-foreground">+{overlapping.length - 2} more</div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )
+    }
+
+    function EventCard({
+      ev,
+      mode,
+    }: {
+      ev: EventItem
+      mode: "suggested" | "discover" | "jumpin" | "mine"
+    }) {
+      const existing = registrations.find((r) => r.event.id === ev.id)
+      const already = Boolean(existing)
+      const conflicts = registeredEvents.some((reg) => overlaps(reg, ev))
+      const attending = (ev.attendees?.length || 0) + (attendingCountById[ev.id] || 0)
+
+      const action = (() => {
+        if (!user) return { label: "Sign in to join", disabled: true, onClick: () => {} }
+        if (already) {
+          if (mode === "mine") return { label: "Remove", disabled: isLoading, onClick: () => removeRegistration(ev.id) }
+          return { label: "Added", disabled: true, onClick: () => {} }
+        }
+        if (mode === "jumpin") return { label: "Quick Join", disabled: isLoading, onClick: () => addRegistration(ev, "jumpin") }
+        if (mode === "suggested") return { label: "Confirm", disabled: isLoading, onClick: () => addRegistration(ev, "scheduled") }
+        return { label: "Register", disabled: isLoading || !canRegister(ev), onClick: () => addRegistration(ev, "manual") }
+      })()
+
+      return (
+        <Card className="rounded-2xl">
+          <CardHeader className="space-y-1 pb-3">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <CardTitle className="text-base truncate">{ev.title}</CardTitle>
+                <CardDescription className="mt-1 flex items-center gap-1 truncate">
+                  <MapPin className="h-4 w-4" />
+                  <span className="truncate">{ev.location}</span>
+                </CardDescription>
+              </div>
+
+              {mode !== "mine" && conflicts && (
+                <Badge variant={mode === "jumpin" ? "destructive" : "secondary"} className="shrink-0">
+                  Conflict
+                </Badge>
+              )}
+            </div>
+          </CardHeader>
+
+          <CardContent className="space-y-2 pt-0">
+            <div className="text-sm text-muted-foreground line-clamp-2">{ev.description}</div>
+            <div className="text-sm font-medium">{formatTimeRange(ev)}</div>
+
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-muted-foreground">{attending} attending</div>
+              {existing?.kind && (
+                <Badge variant="outline" className="text-xs">
+                  {existing.kind === "scheduled" ? "Scheduled" : existing.kind === "manual" ? "Manual" : "Jump In"}
+                </Badge>
+              )}
+            </div>
+
+            {mode === "discover" && !already && !canRegister(ev) && (
+              <div className="text-xs text-muted-foreground">Overlaps your schedule</div>
+            )}
+          </CardContent>
+
+          <CardFooter className="pt-3">
+            <Button
+              className="w-full rounded-xl"
+              size="sm"
+              variant={mode === "mine" ? "outline" : "default"}
+              disabled={action.disabled}
+              onClick={action.onClick}
+            >
+              {action.label}
+            </Button>
+          </CardFooter>
+        </Card>
+      )
+    }
+
+    function BottomNav() {
+      return (
+        <nav className="fixed bottom-0 left-0 right-0 z-20 border-t bg-background/90 backdrop-blur">
+          <div className="mx-auto grid max-w-5xl grid-cols-5 px-2 py-2">
+            <BottomNavButton active={tab === "schedule"} onClick={() => setTab("schedule")} label="Schedule" icon={<Target className="h-5 w-5" />} />
+            <BottomNavButton active={tab === "week"} onClick={() => setTab("week")} label="Week" icon={<CalendarDays className="h-5 w-5" />} />
+            <BottomNavButton active={tab === "discover"} onClick={() => setTab("discover")} label="Discover" icon={<Compass className="h-5 w-5" />} />
+            <BottomNavButton active={tab === "jumpin"} onClick={() => setTab("jumpin")} label="Jump In" icon={<Zap className="h-5 w-5" />} />
+            <BottomNavButton active={tab === "profile"} onClick={() => setTab("profile")} label="Me" icon={<User className="h-5 w-5" />} />
+          </div>
+        </nav>
+      )
+    }
 
     return (
-      <div className="mt-2 grid grid-cols-1 gap-1 text-xs">
-        {slots.map((slot) => {
-          const slotStart = slot.getTime()
-          const slotEnd = slotStart + 60 * 60 * 1000
-
-          const overlapping = events.filter((ev) => {
-            const s = new Date(ev.start).getTime()
-            const e = new Date(ev.end).getTime()
-            // any intersection with [slotStart, slotEnd)
-            return s < slotEnd && e > slotStart
-          })
-
-          return (
-            <div
-              key={slot.toISOString()}
-              className={`flex justify-between items-center p-1 rounded ${
-                overlapping.length ? "bg-indigo-100" : ""
-              }`}
-            >
-              <span>{slot.toLocaleTimeString(undefined, { hour: "numeric", hour12: true })}</span>
-
-              <div className="ml-2 flex flex-wrap gap-2">
-                {overlapping.map((e) => (
-                  <span key={e.id} className="font-medium">
-                    {e.title}
-                  </span>
-                ))}
-              </div>
+      <div className="min-h-screen bg-background">
+        {/* Sticky header */}
+        <header className="sticky top-0 z-20 border-b bg-background/80 backdrop-blur">
+          <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+            <div className="flex items-center gap-3">
+              <Image src="/logo.png" alt="EventU Logo" width={110} height={32} priority />
+              <Badge variant="secondary" className="hidden sm:inline-flex">
+                {now.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}
+              </Badge>
             </div>
-          )
-        })}
-      </div>
-    )
-  }
 
-  function canRegister(event: EventItem) {
-    return !registeredEvents.some((reg) => overlaps(reg, event))
-  }
+            <div className="flex items-center gap-2">
+              {/* Info dialog */}
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="rounded-xl">
+                    <Info className="h-4 w-4" />
+                    <span className="ml-2 hidden sm:inline">What is this?</span>
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-2xl">
+                  <DialogHeader>
+                    <DialogTitle>What EventU is about</DialogTitle>
+                    <DialogDescription>
+                      A simple way to meet people through scheduled activities.
+                    </DialogDescription>
+                  </DialogHeader>
 
-  function handleRegister(ev: EventItem) {
-    setWarning(null)
-    if (!canRegister(ev)) {
-      setWarning("This event overlaps with one of your registered events.")
-      return
-    }
-    const name = user?.name || user?.email || "(unknown)"
-    setRegistrations((prev) => [...prev, { event: ev, name }])
-  }
+                  <div className="space-y-4 text-sm">
+                    <div className="rounded-xl border bg-muted/20 p-4">
+                      <div className="flex items-start gap-3">
+                        <Sparkles className="mt-0.5 h-5 w-5 text-muted-foreground" />
+                        <div>
+                          <div className="font-medium">How it works</div>
+                          <div className="mt-1 text-muted-foreground">
+                            Set your weekly availability. We schedule you into games and activities during the week so you
+                            can plan ahead and meet new people—without coordinating in group chats.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
 
-  // ✅ Jump-ins bypass overlap checks (by design)
-  function handleJumpIn(ev: EventItem) {
-    setWarning(null)
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border p-4">
+                        <div className="flex items-center gap-2 font-medium">
+                          <Users className="h-4 w-4" /> Meet new people
+                        </div>
+                        <div className="mt-1 text-muted-foreground">
+                          We mix groups so you’re not always playing with the same people.
+                        </div>
+                      </div>
 
-    const already = registrations.some((r) => r.event.id === ev.id)
-    if (already) return
+                      <div className="rounded-xl border p-4">
+                        <div className="flex items-center gap-2 font-medium">
+                          <Target className="h-4 w-4" /> Plan your week
+                        </div>
+                        <div className="mt-1 text-muted-foreground">
+                          You’ll know your games ahead of time so it fits your schedule.
+                        </div>
+                      </div>
 
-    const conflicts = registeredEvents.some((reg) => overlaps(reg, ev))
-    if (conflicts) {
-      setWarning("Jump-in added an event that overlaps your schedule (allowed for Jump Ins).")
-    }
+                      <div className="rounded-xl border p-4">
+                        <div className="flex items-center gap-2 font-medium">
+                          <Zap className="h-4 w-4" /> Jump Ins
+                        </div>
+                        <div className="mt-1 text-muted-foreground">
+                          After 1PM, you can join last-minute games for the rest of today (overlaps allowed).
+                        </div>
+                      </div>
 
-    const name = user?.name || user?.email || "(unknown)"
-    setRegistrations((prev) => [...prev, { event: ev, name }])
+                      <div className="rounded-xl border p-4">
+                        <div className="flex items-center gap-2 font-medium">
+                          <CheckCircle2 className="h-4 w-4" /> $5 commitment
+                        </div>
+                        <div className="mt-1 text-muted-foreground">
+                          Everyone starts with a $5 commitment. If you don’t show up, it gets donated to charity.
+                        </div>
+                      </div>
+                    </div>
 
-    // optional: close popup after joining
-    setJumpOpen(false)
-  }
+                    <Separator />
 
-  function handleUnregister(id: string) {
-    setRegistrations((prev) => prev.filter((r) => r.event.id !== id))
-  }
+                    <div className="text-muted-foreground">
+                      The goal is simple: less planning, more real games with real people.
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
 
-  return (
-    <div className="min-h-screen p-6">
-      <h1 className="text-2xl font-semibold mb-4 text-center">
-        <div className="flex justify-center">
-          <Image src="/logo.png" alt="EventU Logo" width={300} height={300} priority />
-        </div>
-        {user && (
-          <span className="block text-sm text-muted-foreground mt-1">
-            Signed in as {user.name || user.email}
-          </span>
-        )}
-        <LogoutButton />
-      </h1>
-
-      <div className="flex gap-6">
-        <main className="flex-1 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-medium">Available Events</h2>
-
-            <div className="text-sm text-muted-foreground">
-              Auto-generated weekly list (Sunday 8PM CST)
+              <LogoutButton />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {events.map((ev) => {
-              const already = registrations.some((r) => r.event.id === ev.id)
-              return (
-                <Card key={ev.id}>
-                  <CardHeader>
-                    <CardTitle>{ev.title}</CardTitle>
-                    <CardDescription>{ev.location}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm text-muted-foreground">{ev.description}</p>
-                    <p className="mt-3 text-sm">{formatTimeRange(ev)}</p>
-                  </CardContent>
-                  <CardFooter className="justify-between">
-                    <div className="text-sm">
-                      {(ev.attendees?.length || 0) + (attendingCountById[ev.id] || 0)} attending
-                    </div>
-                    <Button
-                      size="sm"
-                      onClick={() => handleRegister(ev)}
-                      disabled={already || !user || isLoading}
-                      variant={already ? "outline" : "default"}
-                    >
-                      {already ? "Registered" : "Register"}
-                    </Button>
-                  </CardFooter>
-                </Card>
-              )
-            })}
-          </div>
-        </main>
-
-        <aside className="w-80">
-          <div className="sticky top-6 space-y-3">
-            {/* ✅ Jump In button now above My Schedule */}
-            <Dialog open={jumpOpen} onOpenChange={setJumpOpen}>
-              <DialogTrigger asChild>
-                <Button className="w-full" disabled={!user || isLoading} variant="default">
-                  Jump In Right Now
-                </Button>
-              </DialogTrigger>
-
-              <DialogContent className="sm:max-w-2xl">
-                <DialogHeader>
-                  <DialogTitle>Last Minute Jump Ins</DialogTitle>
-                  <DialogDescription>
-                    {now.toLocaleString(undefined, {
-                      weekday: "long",
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}
-                  </DialogDescription>
-                </DialogHeader>
-
-                {!isPast1PM ? (
-                  <div className="rounded-md border bg-muted/30 p-4 text-sm">
-                    <div className="font-medium">
-                      Daily last minute jump ins will be available at 1PM.
-                    </div>
-                    <div className="mt-1 text-muted-foreground">
-                      Come back after 1:00 PM to see games you can hop into for the rest of today.
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="text-sm text-muted-foreground">
-                      Available games for the rest of today (overlaps allowed).
-                    </div>
-
-                    {jumpInEvents.length === 0 ? (
-                      <div className="text-sm text-muted-foreground">
-                        Nothing scheduled for the rest of today.
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {jumpInEvents.map((ev) => {
-                          const already = registrations.some((r) => r.event.id === ev.id)
-                          const conflicts = registeredEvents.some((reg) => overlaps(reg, ev))
-
-                          return (
-                            <Card key={ev.id}>
-                              <CardHeader>
-                                <CardTitle className="flex items-center justify-between">
-                                  <span>{ev.title}</span>
-                                  {conflicts && (
-                                    <span className="text-xs text-destructive">Conflicts</span>
-                                  )}
-                                </CardTitle>
-                                <CardDescription>{ev.location}</CardDescription>
-                              </CardHeader>
-                              <CardContent>
-                                <p className="text-sm text-muted-foreground">{ev.description}</p>
-                                <p className="mt-3 text-sm">{formatTimeRange(ev)}</p>
-                              </CardContent>
-                              <CardFooter className="justify-between">
-                                <div className="text-sm">
-                                  {(ev.attendees?.length || 0) + (attendingCountById[ev.id] || 0)} attending
-                                </div>
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleJumpIn(ev)}
-                                  disabled={already || !user || isLoading}
-                                  variant={already ? "outline" : "default"}
-                                >
-                                  {already ? "Added" : "Quick Join"}
-                                </Button>
-                              </CardFooter>
-                            </Card>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </DialogContent>
-            </Dialog>
-
-            <div className="rounded-lg border bg-card p-4">
-              <h3 className="font-semibold">Your Schedule</h3>
-              <HoursCalendar events={registeredEvents} />
-              <p className="text-sm text-muted-foreground">
-                Registered events (no overlaps allowed)
-              </p>
-
-              <div className="mt-3 space-y-2">
-                {registrations.length === 0 && (
-                  <div className="text-sm text-muted-foreground">No events yet</div>
-                )}
-                {registrations.map((r) => (
-                  <div
-                    key={r.event.id}
-                    className="flex items-start justify-between gap-2 border rounded-md p-2"
-                  >
-                    <div>
-                      <div className="font-medium text-sm">{r.event.title}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {formatTimeRange(r.event)}
-                      </div>
-                      <div className="text-xs text-muted-foreground">You: {r.name}</div>
-                    </div>
-                    <Button size="sm" variant="ghost" onClick={() => handleUnregister(r.event.id)}>
-                      Remove
-                    </Button>
-                  </div>
-                ))}
+          <div className="mx-auto max-w-5xl px-4 pb-3">
+            {user ? (
+              <div className="text-xs text-muted-foreground">
+                Signed in as <span className="font-medium">{user.name || user.email}</span>
               </div>
-            </div>
+            ) : (
+              <div className="text-xs text-muted-foreground">Sign in to set availability and get scheduled.</div>
+            )}
+          </div>
+        </header>
 
+        {/* Main */}
+        <main className="mx-auto max-w-5xl px-4 pb-28 pt-4">
+          {/* Hero */}
+          {/* Tab content */}
+          <div className="mt-4">
+            {tab === "schedule" && (
+              <ScheduleTabMobile
+                userReady={userReady}
+                availability={availability}
+                onToggle={toggleAvailability}
+                onQuickSet={quickSetAvailability}
+                suggested={suggestedSchedule}
+                onConfirm={(ev) => addRegistration(ev, "scheduled")}
+              />
+            )}
+
+            {tab === "week" && (
+              <WeekTabMobile
+                now={now}
+                registrations={registrations}
+                myUpcoming={myUpcoming}
+                onRemove={removeRegistration}
+                calendar={<HoursStrip events={registeredEvents} />}
+              />
+            )}
+
+            {tab === "discover" && (
+              <DiscoverTabMobile
+                query={query}
+                setQuery={setQuery}
+                hideConflicts={hideConflicts}
+                setHideConflicts={setHideConflicts}
+                events={discoverEvents}
+                render={(ev) => <EventCard key={ev.id} ev={ev} mode="discover" />}
+              />
+            )}
+
+            {tab === "jumpin" && (
+              <JumpInTabMobile
+                isPast1PM={isPast1PM}
+                jumpInEvents={jumpInEvents}
+                render={(ev) => <EventCard key={ev.id} ev={ev} mode="jumpin" />}
+              />
+            )}
+
+            {tab === "profile" && <ProfileTabMobile />}
+          </div>
+
+          {/* Warnings/errors */}
+          <div className="mt-4 space-y-2">
             {warning && (
-              <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+              <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
                 {warning}
               </div>
             )}
-
             {error && (
-              <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+              <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
                 {String(error)}
               </div>
             )}
           </div>
-        </aside>
+        </main>
+
+        <BottomNav />
+        <div className="h-6" />
       </div>
-    </div>
-  )
-}
+    )
+  }
+
+  function BottomNavButton({
+    active,
+    onClick,
+    icon,
+    label,
+  }: {
+    active: boolean
+    onClick: () => void
+    icon: React.ReactNode
+    label: string
+  }) {
+    return (
+      <button
+        onClick={onClick}
+        className={`flex flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-[11px] ${
+          active ? "bg-muted font-medium" : "text-muted-foreground"
+        }`}
+      >
+        {icon}
+        <span>{label}</span>
+      </button>
+    )
+  }
+
+  export function formatHour(h: number) {
+    const hour12 = ((h + 11) % 12) + 1
+    const ampm = h >= 12 ? "PM" : "AM"
+    return `${hour12}${ampm}`
+  }

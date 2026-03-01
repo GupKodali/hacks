@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { OnboardingShell } from "../_components/OnboardingShell";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { MiniAvailabilityGrid } from "@/components/availability-graph";
+import { AvailabilityBlock } from "@/app/dashboard/page";
+import { useUser } from "@auth0/nextjs-auth0";
 
 const STORAGE_KEY = "eventu_onboarding_v1";
 
@@ -49,10 +51,6 @@ function saveDraft(draft: OnboardingDraft) {
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
-// ✅ Only whole hours, stored as "HH:00"
-const HOUR_OPTIONS = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, "0")}:00`);
-
-// If older saved times exist like "18:30", normalize to "18:00"
 function normalizeToHour(t: string) {
   if (!t || t.length < 2) return "18:00";
   const hh = t.slice(0, 2);
@@ -60,9 +58,11 @@ function normalizeToHour(t: string) {
 }
 
 function isValidBlock(b: Block) {
-  // "HH:MM" lexicographic compare works for 24h format
   return b.day && b.start && b.end && b.start < b.end;
 }
+
+
+
 
 /**
  * Enforce at most ONE window per day:
@@ -77,13 +77,24 @@ function upsertBlockByDay(blocks: Block[], incoming: Block) {
   return next;
 }
 
+function hhmmToHour(t: string) {
+  // expects "HH:MM"
+  const hh = parseInt(t.slice(0, 2), 10);
+  return Number.isFinite(hh) ? Math.max(0, Math.min(23, hh)) : 0;
+}
+
+function hourToHH00(h: number) {
+  return `${String(h).padStart(2, "0")}:00`;
+}
+
+function dayIndexToKey(i: number) {
+  return DAYS[i] ?? "Mon";
+}
+
 export default function AvailabilityClient() {
   const router = useRouter();
 
   const [blocks, setBlocks] = useState<Block[]>([]);
-  const [day, setDay] = useState<(typeof DAYS)[number]>("Mon");
-  const [start, setStart] = useState("18:00");
-  const [end, setEnd] = useState("20:00");
 
   const [location, setLocation] = useState<LocationData | null>(null);
   const [locating, setLocating] = useState(false);
@@ -92,7 +103,6 @@ export default function AvailabilityClient() {
   useEffect(() => {
     const draft = loadDraft();
 
-    // ✅ Normalize any previously-saved minutes to ":00"
     const normalizedBlocks = (draft.availabilityBlocks ?? []).map((b) => ({
       ...b,
       start: normalizeToHour(b.start),
@@ -102,14 +112,22 @@ export default function AvailabilityClient() {
     setBlocks(normalizedBlocks);
     setLocation(draft.location ?? null);
 
-    // If we changed blocks by normalizing, persist it once
     if (JSON.stringify(normalizedBlocks) !== JSON.stringify(draft.availabilityBlocks ?? [])) {
       saveDraft({ ...draft, availabilityBlocks: normalizedBlocks });
     }
   }, []);
 
-  const addBlock = () => {
-    const newBlock: Block = { day, start, end };
+  const removeBlockByDay = (dayKey: string) => {
+    setBlocks((prev) => {
+      const next = prev.filter((b) => b.day !== dayKey);
+      const draft = loadDraft();
+      saveDraft({ ...draft, availabilityBlocks: next });
+      return next;
+    });
+  };
+
+  const setBlockForDay = (dayKey: string, startHour: number, endHour: number) => {
+    const newBlock: Block = { day: dayKey, start: hourToHH00(startHour), end: hourToHH00(endHour) };
     if (!isValidBlock(newBlock)) return;
 
     setBlocks((prev) => {
@@ -120,12 +138,42 @@ export default function AvailabilityClient() {
     });
   };
 
-  const removeBlock = (idx: number) => {
+
+  // Toggle an hour cell, then compress that day into ONE contiguous window (min..max+1)
+  const handleToggle = (dayIdx: number, hour: number) => {
     setBlocks((prev) => {
-      const next = prev.filter((_, i) => i !== idx);
+      const dayKey = dayIndexToKey(dayIdx);
+
+      // Build selected hours set from existing window (single block/day)
+      const existing = prev.find((b) => b.day === dayKey);
+      const selected = new Set<number>();
+
+      if (existing) {
+        const s = hhmmToHour(normalizeToHour(existing.start));
+        const e = hhmmToHour(normalizeToHour(existing.end));
+        for (let h = s; h < e; h++) selected.add(h);
+      }
+
+      // Toggle clicked hour
+      if (selected.has(hour)) selected.delete(hour);
+      else selected.add(hour);
+
+      const nextSelected = Array.from(selected).sort((a, b) => a - b);
+
+      let nextBlocks: Block[];
+      if (nextSelected.length === 0) {
+        nextBlocks = prev.filter((b) => b.day !== dayKey);
+      } else {
+        const startH = nextSelected[0];
+        const endH = nextSelected[nextSelected.length - 1] + 1; // end is exclusive
+        const incoming: Block = { day: dayKey, start: hourToHH00(startH), end: hourToHH00(endH) };
+        nextBlocks = upsertBlockByDay(prev.filter((b) => b.day !== dayKey), incoming);
+      }
+
       const draft = loadDraft();
-      saveDraft({ ...draft, availabilityBlocks: next });
-      return next;
+      saveDraft({ ...draft, availabilityBlocks: nextBlocks });
+
+      return nextBlocks;
     });
   };
 
@@ -158,9 +206,7 @@ export default function AvailabilityClient() {
       (err) => {
         console.error(err);
         setLocationError(
-          err.code === err.PERMISSION_DENIED
-            ? "Location permission denied."
-            : "Unable to retrieve your location."
+          err.code === err.PERMISSION_DENIED ? "Location permission denied." : "Unable to retrieve your location."
         );
         setLocating(false);
       },
@@ -174,15 +220,13 @@ export default function AvailabilityClient() {
     const draft = loadDraft();
     saveDraft({ ...draft, location: null });
   };
-
+  const [availability, setAvailability] = useState<AvailabilityBlock[]>([])
   const canContinue = blocks.length > 0;
 
   const subtitle = useMemo(
     () => "Add time windows you can reliably make during the week. Matching uses overlaps.",
     []
   );
-
-  const dayAlreadyHasWindow = useMemo(() => blocks.some((b) => b.day === day), [blocks, day]);
 
   const orderedBlocks = useMemo(() => {
     const order = new Map(DAYS.map((d, i) => [d, i]));
@@ -193,70 +237,11 @@ export default function AvailabilityClient() {
     );
   }, [blocks]);
 
-  const currentSelectionValid = isValidBlock({ day, start, end });
-
   return (
     <OnboardingShell step={2} title="Set your availability" subtitle={subtitle}>
       <div className="space-y-4">
         <div className="rounded-xl border p-4 space-y-3">
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-1">
-              <Label>Day</Label>
-              <select
-                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                value={day}
-                onChange={(e) => setDay(e.target.value as (typeof DAYS)[number])}
-              >
-                {DAYS.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <Label>Start (hour)</Label>
-              <select
-                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                value={start}
-                onChange={(e) => setStart(e.target.value)}
-              >
-                {HOUR_OPTIONS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <Label>End (hour)</Label>
-              <select
-                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                value={end}
-                onChange={(e) => setEnd(e.target.value)}
-              >
-                {HOUR_OPTIONS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <Button type="button" className="h-11 w-full" onClick={addBlock} disabled={!currentSelectionValid}>
-            {dayAlreadyHasWindow ? "Update time window" : "Add time window"}
-          </Button>
-
-          {!currentSelectionValid && (
-            <p className="text-xs text-destructive">End time must be after start time.</p>
-          )}
-
-          <p className="text-xs text-muted-foreground">
-            Tip: fewer, reliable windows beats “maybe” availability. (One window per day max.)
-          </p>
+          <MiniAvailabilityGrid disabled={false} availability={availability} onToggle={handleToggle} />
         </div>
 
         <Separator />
@@ -268,9 +253,9 @@ export default function AvailabilityClient() {
             <p className="text-sm text-muted-foreground">No availability added yet.</p>
           ) : (
             <ul className="space-y-2">
-              {orderedBlocks.map((b, idx) => (
+              {orderedBlocks.map((b) => (
                 <li
-                  key={`${b.day}-${b.start}-${b.end}-${idx}`}
+                  key={`${b.day}-${b.start}-${b.end}`}
                   className="flex items-center justify-between rounded-lg border px-3 py-2"
                 >
                   <div className="text-sm">
@@ -281,7 +266,7 @@ export default function AvailabilityClient() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => removeBlock(idx)}
+                    onClick={() => removeBlockByDay(b.day)}
                     className="text-xs text-muted-foreground underline underline-offset-4"
                   >
                     Remove
@@ -314,11 +299,7 @@ export default function AvailabilityClient() {
               {typeof location.accuracy === "number" && <div>Accuracy: ±{Math.round(location.accuracy)}m</div>}
               <div>Updated: {new Date(location.updatedAt).toLocaleString()}</div>
 
-              <button
-                type="button"
-                onClick={handleClearLocation}
-                className="text-xs underline underline-offset-4"
-              >
+              <button type="button" onClick={handleClearLocation} className="text-xs underline underline-offset-4">
                 Clear location
               </button>
             </div>

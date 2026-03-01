@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { MobileNav } from "@/components/MobileNav";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,9 +30,6 @@ export default function RootLayout({
   return (
     <main>
       <html>
-        <div className="absolute top-4 right-4">
-          <MobileNav items={navItems} />
-        </div>
         <body>
           <main className="flex-1 p-6">{children}</main>
         </body>
