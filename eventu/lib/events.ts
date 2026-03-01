@@ -20,44 +20,47 @@ export function overlaps(a: EventItem, b: EventItem) {
 export function formatTimeRange(item: EventItem) {
   const s = new Date(item.start)
   const e = new Date(item.end)
-  return `${s.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })} — ${e.toLocaleString(
-    undefined,
-    { timeStyle: "short" }
-  )}`
+  return `${s.toLocaleString(undefined, {
+    dateStyle: "short",
+    timeStyle: "short",
+  })} — ${e.toLocaleString(undefined, {
+    timeStyle: "short",
+  })}`
 }
 
 /**
- * Returns the NEXT occurrence of weekday at (hour:minute),
- * but if today is that weekday, it will return TODAY as long as
- * the target time has not already passed.
+ * Returns the next occurrence of weekday at given hour/minute.
+ * If today is that weekday:
+ *   - returns today if time has not passed
+ *   - otherwise returns next week's weekday
  *
  * weekday: 0=Sunday ... 6=Saturday
  */
-function nextOrTodayWeekdayDate(weekday = 0, hour = 20, minute = 0) {
+function nextOrTodayWeekdayDate(
+  weekday: number,
+  hour: number,
+  minute: number
+) {
   const now = new Date()
   const today = now.getDay()
 
-  const target = new Date(now)
-  target.setHours(hour, minute, 0, 0)
-
   let diff = (weekday + 7 - today) % 7
 
-  // If it's the same weekday:
-  // - use today if time is still upcoming (or exactly now)
-  // - otherwise go to next week
-  if (diff === 0 && target.getTime() < now.getTime()) {
-    diff = 7
+  const candidate = new Date(now)
+  candidate.setDate(now.getDate() + diff)
+  candidate.setHours(hour, minute, 0, 0)
+
+  // If it's today but time already passed → go to next week
+  if (diff === 0 && candidate.getTime() < now.getTime()) {
+    candidate.setDate(candidate.getDate() + 7)
   }
 
-  target.setDate(now.getDate() + diff)
-  // hours already set above
-  return target
+  return candidate
 }
 
 export function sampleEvents(): EventItem[] {
-  // Next Sunday 6PM and (today-or-next) Saturday 6PM
-  const sunday = nextOrTodayWeekdayDate(0, 18, 0) // Sunday 6:00 PM
-  const saturday = nextOrTodayWeekdayDate(6, 18, 0) // Saturday 6:00 PM (today if Sat and before 6)
+  // Sunday events (6 PM block)
+  const sunday = nextOrTodayWeekdayDate(0, 18, 0)
 
   const ev1Start = new Date(sunday)
   const ev1End = new Date(ev1Start)
@@ -73,11 +76,13 @@ export function sampleEvents(): EventItem[] {
   const ev3End = new Date(ev3Start)
   ev3End.setHours(ev3Start.getHours() + 2)
 
-  // ✅ Event 4 should be today (Saturday) at 8PM:
-  const ev4Start = new Date(saturday)
-  ev4Start.setHours(20, 0, 0, 0) // 8:00 PM local time
+  // ✅ Event 4: Saturday at 8:00 PM (today if Saturday before 8PM)
+  const ev4Start = nextOrTodayWeekdayDate(6, 20, 0)
   const ev4End = new Date(ev4Start)
-  ev4End.setHours(ev4Start.getHours() + 2) // ends 10:00 PM
+  ev4End.setHours(ev4Start.getHours() + 2)
+
+  // Debug (optional — remove after confirming)
+  // console.log("Event 4 local:", ev4Start.toString())
 
   return [
     {
@@ -114,15 +119,31 @@ export function sampleEvents(): EventItem[] {
       start: ev4Start.toISOString(),
       end: ev4End.toISOString(),
       location: "HSS Courts",
-      attendees: ["John", "Jane", "Bob", "Alice", "Tom", "Sara", "Mike", "Emily", "David", "Laura"],
+      attendees: [
+        "John",
+        "Jane",
+        "Bob",
+        "Alice",
+        "Tom",
+        "Sara",
+        "Mike",
+        "Emily",
+        "David",
+        "Laura",
+      ],
     },
   ]
 }
 
-export function eventsHappeningToday(events: EventItem[], nowArg?: Date): EventItem[] {
+export function eventsHappeningToday(
+  events: EventItem[],
+  nowArg?: Date
+): EventItem[] {
   const now = nowArg ? new Date(nowArg) : new Date()
+
   const sod = new Date(now)
   sod.setHours(0, 0, 0, 0)
+
   const eod = new Date(now)
   eod.setHours(23, 59, 59, 999)
 
@@ -140,5 +161,8 @@ export function eventsHappeningToday(events: EventItem[], nowArg?: Date): EventI
 
       return touchesToday && notEndedYet
     })
-    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+    .sort(
+      (a, b) =>
+        new Date(a.start).getTime() - new Date(b.start).getTime()
+    )
 }
