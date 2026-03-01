@@ -4,6 +4,7 @@ import React, { useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
 import { ChevronDown, ChevronUp } from "lucide-react"
 import type { AvailabilityBlock } from "./page" // adjust import path
 import type { EventItem } from "@/lib/events"
@@ -14,8 +15,20 @@ type Props = {
   availability: AvailabilityBlock[]
   onToggle: (day: number, hour: number) => void
   onQuickSet: (preset: "weeknights" | "weekend" | "clear") => void
+
+  /**
+   * IMPORTANT:
+   * This component will render however many items you pass here.
+   * If you're only seeing 2, the parent/API is only giving 2.
+   */
   suggested: EventItem[]
   onConfirm: (ev: EventItem) => void
+
+  /**
+   * Optional: pass the user's tag "slugs" or names down so we can filter client-side.
+   * Examples: ["pickleball", "soccer", "board-games"]
+   */
+  userTags?: string[]
 }
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
@@ -43,10 +56,26 @@ function compressHours(hours: number[]) {
   }
   return ranges.map(({ start, end }) => {
     if (start === end) return hourLabel(start)
-    // interpret blocks as hour slots; show as start–(end+1)
     const endDisplay = end + 1
     return `${hourLabel(start)}–${hourLabel(endDisplay)}`
   })
+}
+
+/**
+ * Best-effort tag extractor. Adjust this to match what your API returns.
+ * Recommended: put `tags: string[]` on EventItem in your suggested query.
+ */
+function getEventTags(ev: EventItem): string[] {
+  const anyEv = ev as unknown as {
+    tags?: string[]
+    tag_slugs?: string[]
+    tag_ids?: string[]
+  }
+
+  if (Array.isArray(anyEv.tags)) return anyEv.tags
+  if (Array.isArray(anyEv.tag_slugs)) return anyEv.tag_slugs
+  if (Array.isArray(anyEv.tag_ids)) return anyEv.tag_ids
+  return []
 }
 
 export function ScheduleTabMobile({
@@ -56,10 +85,15 @@ export function ScheduleTabMobile({
   onQuickSet,
   suggested,
   onConfirm,
+  userTags = [],
 }: Props) {
   // If they already picked stuff, keep the grid collapsed by default.
   const [gridOpen, setGridOpen] = useState(availability.length === 0)
   const [showAllHours, setShowAllHours] = useState(false)
+
+  // Suggested list controls
+  const [onlyMyInterests, setOnlyMyInterests] = useState(true)
+  const [showAllSuggested, setShowAllSuggested] = useState(false)
 
   const selectedByDay = useMemo(() => {
     const map = new Map<number, number[]>()
@@ -83,7 +117,6 @@ export function ScheduleTabMobile({
 
   // “Common” hours (compact): weeknights + weekend day
   const hoursCompact = useMemo(() => {
-    // Feel free to tweak: these are the “set times” most people care about.
     return [10, 11, 12, 13, 14, 18, 19, 20, 21]
   }, [])
 
@@ -95,6 +128,30 @@ export function ScheduleTabMobile({
     for (const b of availability) s.add(`${b.day}-${b.hour}`)
     return s
   }, [availability])
+
+  const filteredSuggested = useMemo(() => {
+    if (!onlyMyInterests) return suggested
+
+    // If user has no tags, don't hide everything
+    if (userTags.length === 0) return suggested
+
+    const userTagSet = new Set(userTags.map((t) => t.toLowerCase().trim()))
+
+    return suggested.filter((ev) => {
+      const evTags = getEventTags(ev).map((t) => t.toLowerCase().trim())
+      // If the event has no tags, keep it (so suggestions don't go empty by accident)
+      if (evTags.length === 0) return true
+      return evTags.some((t) => userTagSet.has(t))
+    })
+  }, [onlyMyInterests, suggested, userTags])
+
+  const SUGGESTED_PREVIEW_COUNT = 6
+  const suggestedToRender = useMemo(() => {
+    if (showAllSuggested) return filteredSuggested
+    return filteredSuggested.slice(0, SUGGESTED_PREVIEW_COUNT)
+  }, [filteredSuggested, showAllSuggested])
+
+  const hiddenCount = Math.max(0, filteredSuggested.length - suggestedToRender.length)
 
   return (
     <div className="space-y-4">
@@ -253,34 +310,66 @@ export function ScheduleTabMobile({
 
       {/* Suggested schedule (compact list) */}
       <div className="space-y-2">
-        <div className="px-4 text-sm font-semibold sm:px-0">Suggested this week</div>
+        <div className="flex items-center justify-between px-4 sm:px-0">
+          <div className="text-sm font-semibold">Suggested this week</div>
 
-        {suggested.length === 0 ? (
+          <div className="flex items-center gap-2">
+            <div className="text-xs text-muted-foreground">Only my interests</div>
+            <Switch
+              checked={onlyMyInterests}
+              onCheckedChange={setOnlyMyInterests}
+              disabled={!userReady}
+            />
+          </div>
+        </div>
+
+        {/* Small helper line if they have no tags */}
+        {onlyMyInterests && userTags.length === 0 && (
+          <div className="px-4 text-xs text-muted-foreground sm:px-0">
+            You don’t have any tags yet—showing all suggestions.
+          </div>
+        )}
+
+        {filteredSuggested.length === 0 ? (
           <div className="px-4 text-sm text-muted-foreground sm:px-0">
-            No suggestions match your set times yet—add more availability.
+            No suggestions match your set times (or interests) yet—add more availability or tags.
           </div>
         ) : (
-          <div className="divide-y border-y">
-            {suggested.map((ev) => (
-              <div key={ev.id} className="-mx-4 w-[calc(100%+2rem)] px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold">{ev.title}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">{ev.location}</div>
-                    <div className="mt-2 text-sm font-medium">{formatTimeRange(ev)}</div>
+          <>
+            <div className="divide-y border-y">
+              {suggestedToRender.map((ev) => (
+                <div key={ev.id} className="-mx-4 w-[calc(100%+2rem)] px-4 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold">{ev.title}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">{ev.location}</div>
+                      <div className="mt-2 text-sm font-medium">{formatTimeRange(ev)}</div>
+                    </div>
+                    <Button
+                      size="sm"
+                      className="shrink-0 rounded-xl"
+                      disabled={!userReady}
+                      onClick={() => onConfirm(ev)}
+                    >
+                      Confirm
+                    </Button>
                   </div>
-                  <Button
-                    size="sm"
-                    className="shrink-0 rounded-xl"
-                    disabled={!userReady}
-                    onClick={() => onConfirm(ev)}
-                  >
-                    Confirm
-                  </Button>
                 </div>
+              ))}
+            </div>
+
+            {filteredSuggested.length > SUGGESTED_PREVIEW_COUNT && (
+              <div className="px-4 sm:px-0">
+                <Button
+                  variant="outline"
+                  className="w-full rounded-xl"
+                  onClick={() => setShowAllSuggested((v) => !v)}
+                >
+                  {showAllSuggested ? "Show fewer" : `Show all (+${hiddenCount})`}
+                </Button>
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
       </div>
     </div>
