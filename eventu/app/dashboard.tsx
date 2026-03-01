@@ -18,15 +18,20 @@ type DbEventRow = {
 }
 
 type DbRegistrationRow = {
-  id: number
+  // Depending on your /api/registrations response, some of these may not exist.
+  // This type supports both "joined event" responses and "event_id only" responses.
+  id?: number
   event_id: number
-  user_sub: string
-  display_name: string | null
-  // optional extras
+  user_sub?: string
+  display_name?: string | null
+  kind?: "scheduled" | "manual" | "jumpin" | string
+  created_at?: string | null
+
   event_name?: string | null
   start_time?: string | null
   end_time?: string | null
   location?: string | null
+  description?: string | null
 }
 
 type Registration = {
@@ -47,7 +52,10 @@ export default function DashboardPage() {
 
   const [warning, setWarning] = useState<string | null>(null)
 
-  // ------- DB: Load events -------
+  // A simple tick to allow a "Refresh" button + optional polling
+  const [refreshTick, setRefreshTick] = useState(0)
+
+  // ------- DB: Load events (with no-store + resilient mapping) -------
   useEffect(() => {
     let alive = true
 
@@ -57,7 +65,7 @@ export default function DashboardPage() {
 
       try {
         console.log("[Dashboard] Fetching /api/events ...")
-        const res = await fetch("/api/events", { method: "GET" })
+        const res = await fetch("/api/events", { method: "GET", cache: "no-store" })
         console.log("[Dashboard] /api/events status:", res.status)
 
         const json = await res.json().catch(() => null)
@@ -69,39 +77,60 @@ export default function DashboardPage() {
 
         const rows: DbEventRow[] = json.events ?? []
 
-        const mapped: EventItem[] = rows.map((r) => ({
-          id: String(r.id),
-          title: r.name,
-          description: r.description ?? "",
-          start: new Date(r.start_time).toISOString(),
-          end: new Date(r.end_time).toISOString(),
-          location: r.location ?? "TBD",
-          attendees: [], // fill later if you add attendee counts to /api/events
-        }))
+        // Resilient mapping: skip bad rows instead of crashing the whole map.
+        const mapped: EventItem[] = []
+        for (const r of rows) {
+          const s = new Date(r.start_time)
+          const e = new Date(r.end_time)
+
+          if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) {
+            console.warn("[Dashboard] Skipping event with invalid times:", r)
+            continue
+          }
+
+          mapped.push({
+            id: String(r.id),
+            title: r.name,
+            description: r.description ?? "",
+            start: s.toISOString(),
+            end: e.toISOString(),
+            location: r.location ?? "TBD",
+            attendees: [],
+          })
+        }
 
         if (!alive) return
-        setEvents(mapped.length ? mapped : (Array.isArray(sampleEvents) ? sampleEvents : []))
+
+        // ✅ DB-only behavior:
+        // Show exactly what DB returns (even if empty). No sample fallback.
+        setEvents(mapped)
       } catch (e: any) {
         console.warn("[Dashboard] Failed to fetch db events:", e)
         if (!alive) return
         setEventsError(e?.message ?? "Failed to fetch events")
-        // optional fallback so UI isn't empty
-        setEvents(Array.isArray(sampleEvents) ? sampleEvents : [])
+        setEvents([]) // ✅ DB-only
       } finally {
         if (alive) setEventsLoading(false)
       }
     }
 
     loadEvents()
+
+    // Optional polling: uncomment if you want it to auto-update without refresh.
+    // const t = setInterval(loadEvents, 30_000)
+    // return () => {
+    //   alive = false
+    //   clearInterval(t)
+    // }
+
     return () => {
       alive = false
     }
-  }, [])
+  }, [refreshTick])
 
-  // ------- DB: Load registrations for this user -------
+  // ------- DB: Load registrations for this user (no-store + robust mapping) -------
   useEffect(() => {
     if (!user?.sub) return
-
     let alive = true
 
     async function loadRegistrations() {
@@ -110,7 +139,7 @@ export default function DashboardPage() {
 
       try {
         console.log("[Dashboard] Fetching /api/registrations ...")
-        const res = await fetch("/api/registrations", { method: "GET" })
+        const res = await fetch("/api/registrations", { method: "GET", cache: "no-store" })
         console.log("[Dashboard] /api/registrations status:", res.status)
 
         const json = await res.json().catch(() => null)
@@ -122,32 +151,37 @@ export default function DashboardPage() {
 
         const rows: DbRegistrationRow[] = json.registrations ?? []
 
-        // You have two options:
-        // A) /api/registrations returns joined event fields (event_name, start_time, etc.) -> we can map directly
-        // B) /api/registrations returns only event_id -> we lookup event from `events` state
-
         const mapped: Registration[] = rows
           .map((r) => {
             const displayName = r.display_name || user?.name || user?.email || "User"
 
-            // If API returns joined event info, use it. Otherwise lookup from `events`.
-            let ev: EventItem | undefined
-
+            // Option A: joined event fields
             if (r.event_name && r.start_time && r.end_time) {
-              ev = {
+              const s = new Date(r.start_time)
+              const e = new Date(r.end_time)
+              if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) {
+                console.warn("[Dashboard] Skipping registration with invalid joined times:", r)
+                return null
+              }
+
+              const ev: EventItem = {
                 id: String(r.event_id),
                 title: r.event_name,
-                description: "",
-                start: new Date(r.start_time).toISOString(),
-                end: new Date(r.end_time).toISOString(),
+                description: r.description ?? "",
+                start: s.toISOString(),
+                end: e.toISOString(),
                 location: r.location ?? "TBD",
                 attendees: [],
               }
-            } else {
-              ev = events.find((e) => e.id === String(r.event_id))
+              return { event: ev, name: displayName }
             }
 
-            if (!ev) return null
+            // Option B: event_id only -> lookup from events state
+            const ev = events.find((e) => e.id === String(r.event_id))
+            if (!ev) {
+              // If events haven't loaded yet, this can temporarily happen.
+              return null
+            }
             return { event: ev, name: displayName }
           })
           .filter(Boolean) as Registration[]
@@ -168,8 +202,7 @@ export default function DashboardPage() {
     return () => {
       alive = false
     }
-    // re-run when events load too, so we can resolve event_id lookups
-  }, [user?.sub, user?.name, user?.email, events])
+  }, [user?.sub, user?.name, user?.email, events, refreshTick])
 
   const registeredEvents = useMemo(() => registrations.map((r) => r.event), [registrations])
 
@@ -230,6 +263,7 @@ export default function DashboardPage() {
       const res = await fetch("/api/registrations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        cache: "no-store",
         body: JSON.stringify({
           eventId: Number(ev.id),
           displayName,
@@ -241,19 +275,8 @@ export default function DashboardPage() {
         throw new Error(json?.error || `Failed to register (status ${res.status})`)
       }
 
-      // Refresh registrations from DB
-      // (simple + consistent; you can optimize later)
-      const refetch = await fetch("/api/registrations", { method: "GET" })
-      const refJson = await refetch.json().catch(() => null)
-      if (refetch.ok && refJson?.ok) {
-        // trigger mapping by updating registrations via effect dependency
-        // easiest: just set a local state from returned rows if your API returns joined events
-        // but we'll rely on the effect by forcing events to stay same; so just do manual mapping here:
-        // Instead, simplest: reload the page section by calling the same effect logic? We'll do a quick local update:
-      }
-
-      // easiest local update (still DB-backed because POST succeeded)
-      setRegistrations((prev) => [...prev, { event: ev, name: displayName }])
+      // Refresh registrations from DB (source of truth)
+      setRefreshTick((x) => x + 1)
     } catch (e: any) {
       console.warn("register failed:", e)
       setWarning(e?.message ?? "Failed to register")
@@ -262,18 +285,20 @@ export default function DashboardPage() {
 
   async function handleUnregister(eventId: string) {
     if (!user?.sub) return
+    setWarning(null)
 
     try {
       const res = await fetch(`/api/registrations?eventId=${encodeURIComponent(eventId)}`, {
         method: "DELETE",
+        cache: "no-store",
       })
       const json = await res.json().catch(() => null)
       if (!res.ok || !json?.ok) {
         throw new Error(json?.error || `Failed to remove (status ${res.status})`)
       }
 
-      // Update UI
-      setRegistrations((prev) => prev.filter((r) => r.event.id !== eventId))
+      // Refresh registrations from DB (source of truth)
+      setRefreshTick((x) => x + 1)
     } catch (e: any) {
       console.warn("unregister failed:", e)
       setWarning(e?.message ?? "Failed to remove registration")
@@ -282,26 +307,39 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen p-6">
-      <div className="mb-4">
-        <img src="/logo.png" alt="EventU" className="h-12 mb-2" />
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <img src="/logo.png" alt="EventU" className="h-12 mb-2" />
 
-        {error && <p className="text-sm text-destructive">Auth error: {String(error)}</p>}
+          {error && <p className="text-sm text-destructive">Auth error: {String(error)}</p>}
 
-        {user && (
-          <p className="text-sm text-muted-foreground">
-            Signed in as {user.name || user.email}
-          </p>
-        )}
+          {user && (
+            <p className="text-sm text-muted-foreground">
+              Signed in as {user.name || user.email}
+            </p>
+          )}
 
-        {eventsLoading && <p className="text-sm text-muted-foreground mt-1">Loading events…</p>}
-        {eventsError && (
-          <p className="text-sm text-destructive mt-1">Couldn’t load DB events: {eventsError}</p>
-        )}
+          {eventsLoading && <p className="text-sm text-muted-foreground mt-1">Loading events…</p>}
+          {eventsError && (
+            <p className="text-sm text-destructive mt-1">Couldn’t load DB events: {eventsError}</p>
+          )}
 
-        {regsLoading && user && <p className="text-sm text-muted-foreground mt-1">Loading your registrations…</p>}
-        {regsError && user && (
-          <p className="text-sm text-destructive mt-1">Couldn’t load registrations: {regsError}</p>
-        )}
+          {regsLoading && user && <p className="text-sm text-muted-foreground mt-1">Loading your registrations…</p>}
+          {regsError && user && (
+            <p className="text-sm text-destructive mt-1">Couldn’t load registrations: {regsError}</p>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setRefreshTick((x) => x + 1)}
+            disabled={eventsLoading || regsLoading}
+          >
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <div className="flex gap-6">
@@ -310,6 +348,12 @@ export default function DashboardPage() {
             <h2 className="text-lg font-medium">Available Events</h2>
             <div className="text-sm text-muted-foreground">Auto-generated weekly list (Sunday 8PM CST)</div>
           </div>
+
+          {events.length === 0 && !eventsLoading && !eventsError && (
+            <div className="rounded-md border p-4 text-sm text-muted-foreground">
+              No events found in the database.
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {events.map((ev) => {
