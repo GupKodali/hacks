@@ -29,17 +29,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <header className="relative flex items-center justify-between p-4">
-  <div className="text-lg font-semibold">My App</div>
-
-  <div className="absolute top-4 right-4">
-    <MobileNav items={navItems} />
-  </div>
-</header>
-      <body>
+    <main>
+      <html>
+        <div className="absolute top-4 right-4">
+          <MobileNav items={navItems} />
+        </div>
+        <body>
           <main className="flex-1 p-6">{children}</main>
-      </body>
-    </html>
+        </body>
+      </html>
+    </main>
   );
 }
