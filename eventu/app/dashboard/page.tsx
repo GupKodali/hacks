@@ -446,8 +446,8 @@
                         <div>
                           <div className="font-medium">How it works</div>
                           <div className="mt-1 text-muted-foreground">
-                            Set your weekly availability. We schedule you into games and activities during the week so you
-                            can plan ahead and meet new people—without coordinating in group chats.
+                            Based on all users' availability, we suggest a personalized schedule each week. You can also browse 
+                            and join other activities that fit your schedule, or jump into last-minute games happening today.
                           </div>
                         </div>
                       </div>
@@ -459,7 +459,7 @@
                           <Users className="h-4 w-4" /> Meet new people
                         </div>
                         <div className="mt-1 text-muted-foreground">
-                          We mix groups so you’re not always playing with the same people.
+                          Meet with communities in your area through shared activities. It's like a gym schedule, but for games and hobbies.
                         </div>
                       </div>
 
@@ -468,7 +468,7 @@
                           <Target className="h-4 w-4" /> Plan your week
                         </div>
                         <div className="mt-1 text-muted-foreground">
-                          You’ll know your games ahead of time so it fits your schedule.
+                          You’ll know your games ahead of time and how many people are in each one.
                         </div>
                       </div>
 
@@ -477,7 +477,7 @@
                           <Zap className="h-4 w-4" /> Jump Ins
                         </div>
                         <div className="mt-1 text-muted-foreground">
-                          After 1PM, you can join last-minute games for the rest of today (overlaps allowed).
+                          After 1PM, you can join last-minute games for the rest of today (overlaps not allowed).
                         </div>
                       </div>
 
@@ -486,7 +486,9 @@
                           <CheckCircle2 className="h-4 w-4" /> $5 commitment
                         </div>
                         <div className="mt-1 text-muted-foreground">
-                          Everyone starts with a $5 commitment. If you don’t show up, it gets donated to charity.
+                          Everyone starts with a $5 commitment. If you don’t show up, it gets donated to charity. 
+                          Showing up means more fun for you and everyone else, and supports the platform. We’ll never 
+                          charge if you show up!
                         </div>
                       </div>
                     </div>
