@@ -75,4 +75,8 @@ docker build -t eventu .
 
 ```cmd
 docker run -p 3000:3000 --env-file .env.local eventu
+
 ```
+
+
+![Memory Dump](public/about.png)
