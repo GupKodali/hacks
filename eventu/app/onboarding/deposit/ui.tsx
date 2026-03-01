@@ -163,6 +163,7 @@ export default function DepositClient() {
 
     // MVP: just send them to dashboard.
     // Later: write hobbies/availability to DB + mark onboardingComplete = true.
+    
     router.push("/dashboard");
   };
 

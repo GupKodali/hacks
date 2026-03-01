@@ -15,8 +15,8 @@ export default async function PostLoginPage() {
   const safeEmail = email ?? "User";
 
   await sql`
-    INSERT INTO users (user_id, username)
-    VALUES (${userId}, ${safeEmail})
+    INSERT INTO users (user_id, username, longitude, latitude)
+    VALUES (${userId}, ${safeEmail}, NULL, NULL)
     ON CONFLICT (user_id) DO NOTHING
   `;
 

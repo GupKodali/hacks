@@ -188,13 +188,35 @@ export default function AvailabilityClient() {
     setLocating(true);
 
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
+      async (pos) => {
         const nextLoc: LocationData = {
           latitude: pos.coords.latitude,
           longitude: pos.coords.longitude,
           accuracy: pos.coords.accuracy,
           updatedAt: Date.now(),
         };
+
+          try {
+          const res = await fetch("/api/users", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              latitude: nextLoc.latitude,
+              longitude: nextLoc.longitude,
+            }),
+          });
+
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(text);
+          }
+
+          console.log("Location saved!");
+        } catch (err) {
+          console.error("Failed to save location:", err);
+        }
 
         setLocation(nextLoc);
 
@@ -325,11 +347,8 @@ export default function AvailabilityClient() {
             onClick={async() => {
               try {
                 const draft = JSON.parse(localStorage.getItem("eventu_onboarding_v1") || "{}");
-                console.log("draft: ", draft)
                 const availabilityBlocks = draft.availabilityBlocks || [];
-                console.log(availabilityBlocks);
                 const interestIds: string[] = draft.hobbies ?? [] ; // assuming hobbies hold selected tag IDs
-                console.log("interestIds: ", interestIds)
                 const res = await fetch("/api/preferences", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
