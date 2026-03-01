@@ -341,7 +341,27 @@ export default function AvailabilityClient() {
             type="button"
             className="h-12 w-full"
             disabled={!canContinue}
-            onClick={() => router.push("/onboarding/deposit")}
+            onClick={async() => {
+              try {
+                const draft = JSON.parse(localStorage.getItem("eventu_onboarding_v1") || "{}");
+                console.log("draft: ", draft)
+                const availabilityBlocks = draft.availabilityBlocks || [];
+                console.log(availabilityBlocks);
+                const interestIds: string[] = draft.hobbies ?? [] ; // assuming hobbies hold selected tag IDs
+                console.log("interestIds: ", interestIds)
+                const res = await fetch("/api/preferences", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ availabilityBlocks, interestIds }),
+                });
+
+                if (!res.ok) throw new Error("Failed to save preferences");
+
+                router.push("/onboarding/deposit");
+              } catch (err) {
+                console.error("Error saving preferences:", err);
+              }
+            }}
           >
             Continue
           </Button>
