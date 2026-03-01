@@ -217,7 +217,7 @@ export default function AvailabilityClient() {
                 console.log("draft: ", draft)
                 const availabilityBlocks = draft.availabilityBlocks || [];
                 console.log(availabilityBlocks);
-                const interestIds = draft.hobbies || []; // assuming hobbies hold selected tag IDs
+                const interestIds: string[] = draft.hobbies ?? [] ; // assuming hobbies hold selected tag IDs
                 console.log("interestIds: ", interestIds)
                 const res = await fetch("/api/preferences", {
                   method: "POST",

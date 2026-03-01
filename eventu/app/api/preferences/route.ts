@@ -4,16 +4,22 @@ import { CaseLower } from "lucide-react";
 
 export async function POST(req: Request) {
   try {
+    console.log("1");
     const session = await auth0.getSession();
+    console.log("2");
     if (!session?.user?.sub) return new Response("Not authenticated", { status: 401 });
+    console.log("3");
     const userId = session.user.sub;
+    console.log("4");
     const body = await req.json();
+    console.log("5");
     const blocks = body.availabilityBlocks ?? [];
     const interestIds = body.interestIds ?? [];
-
-    // Insert availability
+    console.log("AHHHHH");
+    //Insert availability
     for (const b of blocks) {
         let day_num = 0;
+        console.log(day_num);
         switch (b.day) {
             case 'Sun':
                 day_num = 0;
@@ -36,7 +42,7 @@ export async function POST(req: Request) {
             default:
                 day_num = 6;
         }
-
+        console.log(day_num);
       await sql`
         INSERT INTO user_availability (user_id, start_time, end_time, weekday)
         VALUES (${userId}, ${b.start}, ${b.end}, ${day_num})
@@ -46,12 +52,11 @@ export async function POST(req: Request) {
 
     // Insert tags
     for (const tagName of interestIds) {
-        const name = tagName.toLowerCase();
         await sql`
             INSERT INTO user_tags (user_id, tag_id)
             SELECT ${userId}, id
             FROM tags
-            WHERE name = ${name}
+            WHERE name ILIKE ${tagName}
             ON CONFLICT (user_id, tag_id) DO NOTHING
         `;
     }
